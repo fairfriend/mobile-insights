@@ -2,6 +2,19 @@
 import { createClient } from "@/lib/supabase/server";
 import type { SpecGroup } from "@/types/database";
 
+// Priority brand order (shown first everywhere)
+export const PRIORITY_BRANDS = [
+  "samsung", "apple", "xiaomi", "google", "honor",
+  "oneplus", "realme", "oppo", "motorola", "vivo",
+  "redmagic", "nothing", "huawei",
+];
+
+/** Returns a numeric priority score — lower = higher priority */
+export function brandPriority(slug: string): number {
+  const idx = PRIORITY_BRANDS.indexOf(slug?.toLowerCase());
+  return idx === -1 ? PRIORITY_BRANDS.length : idx;
+}
+
 // ── Devices ────────────────────────────────────────────────────────────────
 
 export async function getDevices(options: {
@@ -28,6 +41,36 @@ export async function getDevices(options: {
   return query;
 }
 
+/**
+ * Fetch latest devices for the home page, prioritising top brands.
+ * Strategy:
+ *   1. Fetch a larger pool of 2025 devices (up to 60)
+ *   2. Sort client-side: priority brands first, then by id desc (newest first within each group)
+ *   3. Return the top `limit`
+ */
+export async function getLatestDevicesWithPriority(limit = 12): Promise<any[]> {
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("devices")
+    .select("*, company:companies(id,name,slug)")
+    .eq("is_extracted", true)
+    .eq("announced_year", 2025)
+    .order("id", { ascending: false })
+    .limit(60); // over-fetch so we have enough to re-sort
+
+  if (!data?.length) return [];
+
+  return data
+    .sort((a, b) => {
+      const pa = brandPriority(a.company?.slug);
+      const pb = brandPriority(b.company?.slug);
+      if (pa !== pb) return pa - pb;       // priority brand first
+      return b.id - a.id;                   // newest first within same priority
+    })
+    .slice(0, limit);
+}
+
 export async function getDeviceBySlug(slug: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -49,7 +92,6 @@ export async function getDeviceSpecs(deviceId: number): Promise<SpecGroup[]> {
 
   if (!data) return [];
 
-  // Group by category
   const grouped: Record<string, { name: string; value: string }[]> = {};
   for (const spec of data) {
     const cat = spec.category ?? "Other";
@@ -59,17 +101,13 @@ export async function getDeviceSpecs(deviceId: number): Promise<SpecGroup[]> {
     if (name || value) grouped[cat].push({ name, value });
   }
 
-  return Object.entries(grouped).map(([category, specs]) => ({
-    category,
-    specs,
-  }));
+  return Object.entries(grouped).map(([category, specs]) => ({ category, specs }));
 }
 
 export async function getSimilarDevices(deviceId: number, chipset: string | null, limit = 6) {
   const supabase = await createClient();
   if (!chipset) return [];
 
-  // Find devices with same chipset
   const { data: specMatches } = await supabase
     .from("specifications")
     .select("device_id")
@@ -102,6 +140,35 @@ export async function getCompanies() {
     .select("*")
     .order("name");
   return data ?? [];
+}
+
+/**
+ * Fetch companies sorted with priority brands first, then by device count.
+ */
+export async function getCompaniesSorted(): Promise<{ company: any; count: number }[]> {
+  const supabase = await createClient();
+
+  const [{ data: companies }, { data: counts }] = await Promise.all([
+    supabase.from("companies").select("*").order("name"),
+    supabase.from("devices").select("company_id").eq("is_extracted", true),
+  ]);
+
+  const countMap: Record<number, number> = {};
+  counts?.forEach((d) => {
+    if (d.company_id) countMap[d.company_id] = (countMap[d.company_id] ?? 0) + 1;
+  });
+
+  const list = (companies ?? []).map((c) => ({
+    company: c,
+    count: countMap[c.id] ?? 0,
+  }));
+
+  return list.sort((a, b) => {
+    const pa = brandPriority(a.company.slug);
+    const pb = brandPriority(b.company.slug);
+    if (pa !== pb) return pa - pb;                  // priority first
+    return b.count - a.count;                        // then by device count
+  });
 }
 
 export async function getCompanyBySlug(slug: string) {
