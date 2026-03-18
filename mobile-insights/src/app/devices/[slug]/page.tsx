@@ -14,9 +14,25 @@ import {
 } from "@/lib/queries";
 import { extractSpecValue } from "@/lib/utils";
 import { SpecTable } from "@/components/device/SpecTable";
-import { AiReviewCard } from "@/components/device/AiReviewCard";
+import { AiReviewWrapper } from "@/components/device/AiReviewWrapper";
 import { UserReviewSection } from "@/components/device/UserReviewSection";
 import { SimilarDevices } from "@/components/device/SimilarDevices";
+
+// Top brands that get AI insights generated on-the-fly
+const TOP_BRANDS = new Set([
+  "samsung", "apple", "xiaomi", "google", "honor",
+  "oneplus", "realme", "oppo", "motorola", "vivo",
+  "huawei", "sony", "nokia", "lg", "asus",
+]);
+
+function shouldShowAiReview(device: any): boolean {
+  // Always show for 2024+ devices
+  if (device.announced_year && device.announced_year >= 2024) return true;
+  // Show for all top brand devices regardless of year
+  const brandSlug = device.company?.slug?.toLowerCase() ?? "";
+  const brandName = device.company?.name?.toLowerCase() ?? "";
+  return TOP_BRANDS.has(brandSlug) || TOP_BRANDS.has(brandName);
+}
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -60,6 +76,7 @@ export default async function DevicePage({ params }: Props) {
     : null;
 
   const company = (device as any).company;
+  const showAiReview = shouldShowAiReview(device);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -153,9 +170,13 @@ export default async function DevicePage({ params }: Props) {
 
         {/* Right: Specs + Reviews + AI */}
         <div className="space-y-6">
-          {/* AI Review */}
-          {device.announced_year && device.announced_year >= 2025 && (
-            <AiReviewCard insight={aiInsight} deviceName={device.name} />
+          {/* AI Review — on-the-fly for top brands + 2024+ devices */}
+          {showAiReview && (
+            <AiReviewWrapper
+              deviceId={device.id}
+              deviceName={device.name}
+              initialInsight={aiInsight}
+            />
           )}
 
           {/* Full Specs */}
