@@ -1,25 +1,43 @@
 // @ts-nocheck
 import Link from "next/link";
 import Image from "next/image";
-import { Cpu, Sparkles, ArrowRight, Newspaper, Star } from "lucide-react";
-import { getDevices, getCompanies, getNewsArticles } from "@/lib/queries";
+import { Cpu, Sparkles, ArrowRight, Newspaper } from "lucide-react";
+import {
+  getLatestDevicesWithPriority,
+  getCompaniesSorted,
+  getNewsArticles,
+  PRIORITY_BRANDS,
+} from "@/lib/queries";
 import { formatDate } from "@/lib/utils";
 
-export const revalidate = 3600; // ISR — revalidate every hour
+export const revalidate = 3600;
+
+// Brand logos/emojis fallback map for visual flair
+const BRAND_EMOJI: Record<string, string> = {
+  samsung: "🔵", apple: "🍎", xiaomi: "🟠", google: "🔴",
+  honor: "🟣", oneplus: "🔴", realme: "🟡", oppo: "🟢",
+  motorola: "🔵", vivo: "🔵", redmagic: "🔴", nothing: "⚪",
+  huawei: "🔴",
+};
 
 export default async function HomePage() {
-  const [{ data: latestDevices }, companies, { data: news }] = await Promise.all([
-    getDevices({ limit: 12, year: 2025 }),
-    getCompanies(),
+  const [latestDevices, sortedBrands, { data: news }] = await Promise.all([
+    getLatestDevicesWithPriority(12),
+    getCompaniesSorted(),
     getNewsArticles(4),
   ]);
 
-  const topBrands = companies.slice(0, 12);
+  // Split brands: priority first (shown in hero section), then rest
+  const priorityBrandSet = new Set(PRIORITY_BRANDS);
+  const herosBrands = sortedBrands.filter((b) =>
+    priorityBrandSet.has(b.company.slug?.toLowerCase())
+  ).slice(0, 13);
+  const allBrandsPreview = sortedBrands.slice(0, 18);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-16">
 
-      {/* Hero */}
+      {/* ── Hero ── */}
       <section className="text-center space-y-5 py-10">
         <div className="inline-flex items-center gap-2 bg-brand-600/10 border border-brand-500/20 text-brand-400 text-sm px-4 py-1.5 rounded-full">
           <Sparkles size={14} />
@@ -42,63 +60,106 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Latest 2025 Devices */}
+      {/* ── Latest Devices (2025) — priority brands first ── */}
       <section>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-white">Latest Devices (2025)</h2>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h2 className="text-xl font-bold text-white">Latest Devices (2025)</h2>
+            <p className="text-slate-500 text-sm mt-0.5">Top brands · newest first</p>
+          </div>
           <Link href="/brands" className="text-sm text-brand-400 hover:text-brand-300 flex items-center gap-1">
             View all <ArrowRight size={14} />
           </Link>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {latestDevices?.map((device) => (
-            <Link
-              key={device.id}
-              href={`/devices/${device.slug}`}
-              className="card p-3 hover:border-brand-500/50 transition-all group"
-            >
-              <div className="aspect-square relative mb-3 bg-[#0f172a] rounded-lg overflow-hidden">
-                {device.image_url ? (
-                  <Image
-                    src={device.image_url}
-                    alt={device.name}
-                    fill
-                    className="object-contain p-2 group-hover:scale-105 transition-transform"
-                    sizes="(max-width: 640px) 50vw, 16vw"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-slate-600 text-4xl">📱</div>
+
+        <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          {latestDevices.map((device) => {
+            const brandSlug = device.company?.slug?.toLowerCase() ?? "";
+            const isPriority = priorityBrandSet.has(brandSlug);
+            return (
+              <Link
+                key={device.id}
+                href={`/devices/${device.slug}`}
+                className={`card p-3 hover:border-brand-500/50 transition-all group relative ${
+                  isPriority ? "border-slate-700/80" : "border-slate-800/60"
+                }`}
+              >
+                {isPriority && (
+                  <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-brand-400" />
                 )}
-              </div>
-              <p className="text-xs text-slate-400 mb-0.5">{(device as any).company?.name}</p>
-              <p className="text-sm font-medium text-white leading-tight line-clamp-2">{device.name}</p>
-            </Link>
-          ))}
+                <div className="aspect-square relative mb-3 bg-[#0f172a] rounded-lg overflow-hidden">
+                  {device.image_url ? (
+                    <Image
+                      src={device.image_url}
+                      alt={device.name}
+                      fill
+                      className="object-contain p-2 group-hover:scale-105 transition-transform"
+                      sizes="(max-width: 640px) 50vw, 16vw"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-600 text-4xl">📱</div>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mb-0.5">{device.company?.name}</p>
+                <p className="text-sm font-medium text-white leading-tight line-clamp-2">{device.name}</p>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
-      {/* Brands */}
+      {/* ── Browse by Brand — priority brands highlighted ── */}
       <section>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-white">Browse by Brand</h2>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h2 className="text-xl font-bold text-white">Browse by Brand</h2>
+            <p className="text-slate-500 text-sm mt-0.5">Top brands shown first</p>
+          </div>
           <Link href="/brands" className="text-sm text-brand-400 hover:text-brand-300 flex items-center gap-1">
             All brands <ArrowRight size={14} />
           </Link>
         </div>
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-          {topBrands.map((brand) => (
-            <Link
-              key={brand.id}
-              href={`/brands/${brand.slug}`}
-              className="card p-4 text-center hover:border-brand-500/50 transition-all text-sm font-medium text-slate-300 hover:text-white"
-            >
-              {brand.name}
-            </Link>
-          ))}
+
+        {/* Priority brands row — larger, highlighted */}
+        <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-3 mb-3">
+          {herosBrands.map(({ company, count }) => {
+            const slug = company.slug?.toLowerCase() ?? "";
+            const emoji = BRAND_EMOJI[slug];
+            return (
+              <Link
+                key={company.id}
+                href={`/brands/${company.slug}`}
+                className="card p-3 flex flex-col items-center text-center hover:border-brand-500/60 transition-all group border-brand-900/60 bg-gradient-to-b from-brand-950/30 to-transparent"
+              >
+                <div className="w-10 h-10 rounded-full bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-lg mb-2 group-hover:border-brand-400/40 transition-colors">
+                  {emoji ?? <span className="text-sm font-bold text-brand-400">{company.name.charAt(0)}</span>}
+                </div>
+                <p className="font-semibold text-white text-xs">{company.name}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{count.toLocaleString()}</p>
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Remaining brands — smaller, secondary style */}
+        <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 gap-2">
+          {allBrandsPreview
+            .filter((b) => !priorityBrandSet.has(b.company.slug?.toLowerCase()))
+            .slice(0, 12)
+            .map(({ company, count }) => (
+              <Link
+                key={company.id}
+                href={`/brands/${company.slug}`}
+                className="card p-3 text-center hover:border-brand-500/40 transition-all text-xs font-medium text-slate-400 hover:text-slate-200"
+              >
+                <span className="block font-semibold text-slate-300">{company.name}</span>
+                <span className="text-slate-600">{count.toLocaleString()} devices</span>
+              </Link>
+            ))}
         </div>
       </section>
 
-      {/* AI Insights promo */}
+      {/* ── AI Insights promo ── */}
       <section className="ai-glow rounded-2xl p-8">
         <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
           <div className="flex-1 space-y-3">
@@ -123,7 +184,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Latest News */}
+      {/* ── Latest News ── */}
       {news && news.length > 0 && (
         <section>
           <div className="flex items-center justify-between mb-6">
